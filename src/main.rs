@@ -287,7 +287,8 @@ async fn main() {
             if is_key_down(KeyCode::Right) { yar_x += YAR_SPEED; }
 
             yar_x = yar_x.clamp(0.0, SCREEN_W - YAR_SIZE);
-            yar_y = yar_y.clamp(0.0, SCREEN_H - YAR_SIZE);
+            if yar_y < 0.0 { yar_y = SCREEN_H - YAR_SIZE; }
+            if yar_y > SCREEN_H - YAR_SIZE { yar_y = 0.0; }
 
             let in_neutral_zone = yar_x + YAR_SIZE > NEUTRAL_ZONE_X
                 && yar_x < NEUTRAL_ZONE_X + NEUTRAL_ZONE_W;
