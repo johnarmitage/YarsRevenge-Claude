@@ -3,8 +3,8 @@ use macroquad::prelude::*;
 const SCREEN_W: f32 = 800.0;
 const SCREEN_H: f32 = 600.0;
 
-const NEUTRAL_ZONE_X: f32 = SCREEN_W / 2.0 - 20.0;
-const NEUTRAL_ZONE_W: f32 = 40.0;
+const NEUTRAL_ZONE_X: f32 = SCREEN_W / 2.0 - 150.0;
+const NEUTRAL_ZONE_W: f32 = 150.0;
 
 const SHIELD_X: f32 = SCREEN_W - 80.0;
 const SHIELD_COLS: usize = 2;
