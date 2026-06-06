@@ -136,50 +136,70 @@ impl Missile {
     }
 }
 
-// Zorlon Cannon — charged by nibbling, passes through shield, destroys Qotile
+// Zorlon Cannon — charged only by nibbling the shield by contact.
+// Icon sits on the left edge of the screen tracking Yar's Y.
+// When fired it travels from the left all the way across, destroying
+// shield cells, the Swirl, and the Qotile.
 struct ZorlonCannon {
-    x: f32,
-    y: f32,
-    active: bool,
-    charged: bool,
+    shot_x: f32,
+    shot_y: f32,
+    firing: bool,
+    pub charged: bool,
 }
 
 impl ZorlonCannon {
     fn new() -> Self {
-        Self { x: 0.0, y: 0.0, active: false, charged: false }
+        Self { shot_x: 0.0, shot_y: 0.0, firing: false, charged: false }
     }
 
     fn charge(&mut self) {
         self.charged = true;
     }
 
-    fn fire(&mut self, from_x: f32, from_y: f32) {
-        if self.charged && !self.active {
-            self.x = from_x;
-            self.y = from_y;
-            self.active = true;
+    fn fire(&mut self, yar_center_y: f32) {
+        if self.charged && !self.firing {
+            self.shot_x = 4.0;
+            self.shot_y = yar_center_y;
+            self.firing = true;
             self.charged = false;
         }
     }
 
-    fn update(&mut self) {
-        if self.active {
-            self.x += CANNON_SPEED;
-            if self.x > SCREEN_W {
-                self.active = false;
+    // Destroys any shield cell the beam passes through. Returns true if
+    // the shot reached the Qotile area.
+    fn update(&mut self, shield: &mut Shield) -> bool {
+        if self.firing {
+            self.shot_x += CANNON_SPEED;
+            shield.nibble(self.shot_x, self.shot_y);
+            if self.shot_x >= QOTILE_X - 10.0 {
+                self.firing = false;
+                return true;
+            }
+            if self.shot_x > SCREEN_W {
+                self.firing = false;
             }
         }
+        false
     }
 
-    fn draw(&self) {
-        if self.active {
-            // Bright wide beam
-            draw_rectangle(self.x, self.y - 5.0, 16.0, 10.0, WHITE);
-            draw_rectangle(self.x + 2.0, self.y - 3.0, 12.0, 6.0, YELLOW);
-        }
+    fn hit_swirl(&self, swirl: &Swirl) -> bool {
+        if !self.firing || !swirl.active { return false; }
+        let dy = (self.shot_y - swirl.y).abs();
+        self.shot_x >= swirl.x - 12.0 && self.shot_x <= swirl.x + 12.0 && dy < 12.0
+    }
+
+    fn draw(&self, yar_center_y: f32) {
+        // Icon on left edge when charged, tracking Yar
         if self.charged {
-            // Indicator in top-right corner
-            draw_text("ZORLON CANNON READY - Press Z", 10.0, 48.0, 20.0, YELLOW);
+            draw_rectangle(4.0, yar_center_y - 6.0, 24.0, 12.0, WHITE);
+            draw_rectangle(6.0, yar_center_y - 4.0, 20.0, 8.0, YELLOW);
+            draw_rectangle(8.0, yar_center_y - 2.0, 16.0, 4.0, WHITE);
+        }
+        // Shot in flight — same shape, travels right
+        if self.firing {
+            draw_rectangle(self.shot_x, self.shot_y - 6.0, 24.0, 12.0, WHITE);
+            draw_rectangle(self.shot_x + 2.0, self.shot_y - 4.0, 20.0, 8.0, YELLOW);
+            draw_rectangle(self.shot_x + 4.0, self.shot_y - 2.0, 16.0, 4.0, WHITE);
         }
     }
 }
@@ -269,37 +289,36 @@ async fn main() {
             let in_neutral_zone = yar_x + YAR_SIZE > NEUTRAL_ZONE_X
                 && yar_x < NEUTRAL_ZONE_X + NEUTRAL_ZONE_W;
 
-            // Nibble shield by contact — also charges the Zorlon Cannon
+            let yar_center_y = yar_y + YAR_SIZE / 2.0;
+
+            // Nibble shield by contact — ONLY way to charge the Zorlon Cannon
             if yar_x + YAR_SIZE >= SHIELD_X {
-                if shield.nibble(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0) {
+                if shield.nibble(yar_x + YAR_SIZE, yar_center_y) {
                     score += 10;
                     zorlon.charge();
                 }
             }
 
-            // Space: fire missile (always available)
+            // Space: fire Zorlon Cannon if charged, otherwise fire missile
             if is_key_pressed(KeyCode::Space) {
-                missile.fire(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0);
+                if zorlon.charged {
+                    zorlon.fire(yar_center_y);
+                } else {
+                    missile.fire(yar_x + YAR_SIZE, yar_center_y);
+                }
             }
 
-            // Z: fire Zorlon Cannon (only when charged, not in neutral zone)
-            if is_key_pressed(KeyCode::Z) && !in_neutral_zone {
-                zorlon.fire(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0);
-            }
+            missile.update(&mut shield);
 
-            // Missile destroys shield cells on hit (already handled inside update)
-            if missile.update(&mut shield) {
-                score += 10;
-                zorlon.charge();
-            }
-
-            zorlon.update();
-
-            // Zorlon Cannon hits Qotile
-            if zorlon.active && zorlon.x >= QOTILE_X - 10.0 {
-                zorlon.active = false;
+            if zorlon.update(&mut shield) {
                 score += 1000;
                 state = GameState::Win;
+            }
+
+            // Zorlon Cannon shot destroys the Swirl
+            if zorlon.hit_swirl(&swirl) {
+                swirl.active = false;
+                score += 250;
             }
 
             // Swirl launch timer
@@ -343,7 +362,7 @@ async fn main() {
         draw_circle(QOTILE_X, SCREEN_H / 2.0, 8.0, WHITE);
 
         missile.draw();
-        zorlon.draw();
+        zorlon.draw(yar_y + YAR_SIZE / 2.0);
         swirl.draw();
 
         // Yar (player)
@@ -351,14 +370,9 @@ async fn main() {
             && yar_x < NEUTRAL_ZONE_X + NEUTRAL_ZONE_W;
         let yar_color = if in_nz {
             Color::new(0.3, 1.0, 0.3, 0.5)
-        } else if zorlon.charged {
-            YELLOW
         } else {
             GREEN
         };
-        if zorlon.charged && !in_nz {
-            draw_circle_lines(yar_x + YAR_SIZE / 2.0, yar_y + YAR_SIZE / 2.0, 14.0, 2.0, YELLOW);
-        }
         draw_rectangle(yar_x, yar_y, YAR_SIZE, YAR_SIZE, yar_color);
         draw_triangle(
             Vec2::new(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0),
@@ -371,7 +385,7 @@ async fn main() {
         draw_text(&format!("SCORE: {}", score), 10.0, 24.0, 24.0, WHITE);
 
         let status_text = if zorlon.charged {
-            "SPACE: missile  Z: fire Zorlon Cannon!"
+            "SPACE: fire Zorlon Cannon!  (nibble shield to recharge)"
         } else {
             "SPACE: missile  |  Nibble shield to charge Zorlon Cannon"
         };
