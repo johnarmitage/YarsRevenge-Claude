@@ -18,7 +18,8 @@ const YAR_SPEED: f32 = 4.0;
 
 const QOTILE_X: f32 = SCREEN_W - 30.0;
 
-const CANNON_SPEED: f32 = 8.0;
+const MISSILE_SPEED: f32 = 8.0;
+const CANNON_SPEED: f32 = 10.0;
 const SWIRL_SPEED: f32 = 2.5;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -92,13 +93,14 @@ impl Shield {
     }
 }
 
-struct Cannon {
+// Regular torp — always available, destroyed by shield cells
+struct Missile {
     x: f32,
     y: f32,
     active: bool,
 }
 
-impl Cannon {
+impl Missile {
     fn new() -> Self {
         Self { x: 0.0, y: 0.0, active: false }
     }
@@ -111,10 +113,59 @@ impl Cannon {
         }
     }
 
-    fn update(&mut self, shield: &Shield) {
+    // Returns true if it destroyed a shield cell
+    fn update(&mut self, shield: &mut Shield) -> bool {
+        if self.active {
+            self.x += MISSILE_SPEED;
+            if self.x > SCREEN_W {
+                self.active = false;
+                return false;
+            }
+            if shield.nibble(self.x, self.y) {
+                self.active = false;
+                return true;
+            }
+        }
+        false
+    }
+
+    fn draw(&self) {
+        if self.active {
+            draw_rectangle(self.x, self.y - 2.0, 8.0, 4.0, SKYBLUE);
+        }
+    }
+}
+
+// Zorlon Cannon — charged by nibbling, passes through shield, destroys Qotile
+struct ZorlonCannon {
+    x: f32,
+    y: f32,
+    active: bool,
+    charged: bool,
+}
+
+impl ZorlonCannon {
+    fn new() -> Self {
+        Self { x: 0.0, y: 0.0, active: false, charged: false }
+    }
+
+    fn charge(&mut self) {
+        self.charged = true;
+    }
+
+    fn fire(&mut self, from_x: f32, from_y: f32) {
+        if self.charged && !self.active {
+            self.x = from_x;
+            self.y = from_y;
+            self.active = true;
+            self.charged = false;
+        }
+    }
+
+    fn update(&mut self) {
         if self.active {
             self.x += CANNON_SPEED;
-            if shield.blocks(self.x, self.y) || self.x > SCREEN_W {
+            if self.x > SCREEN_W {
                 self.active = false;
             }
         }
@@ -122,7 +173,13 @@ impl Cannon {
 
     fn draw(&self) {
         if self.active {
-            draw_rectangle(self.x, self.y - 3.0, 12.0, 6.0, LIME);
+            // Bright wide beam
+            draw_rectangle(self.x, self.y - 5.0, 16.0, 10.0, WHITE);
+            draw_rectangle(self.x + 2.0, self.y - 3.0, 12.0, 6.0, YELLOW);
+        }
+        if self.charged {
+            // Indicator in top-right corner
+            draw_text("ZORLON CANNON READY - Press Z", 10.0, 48.0, 20.0, YELLOW);
         }
     }
 }
@@ -190,9 +247,9 @@ fn window_conf() -> Conf {
 async fn main() {
     let mut yar_x = 60.0_f32;
     let mut yar_y = SCREEN_H / 2.0;
-    let mut cannon_charged = false;
     let mut shield = Shield::new();
-    let mut cannon = Cannon::new();
+    let mut missile = Missile::new();
+    let mut zorlon = ZorlonCannon::new();
     let mut swirl = Swirl::new();
     let mut swirl_timer = 0u32;
     let mut state = GameState::Playing;
@@ -212,23 +269,35 @@ async fn main() {
             let in_neutral_zone = yar_x + YAR_SIZE > NEUTRAL_ZONE_X
                 && yar_x < NEUTRAL_ZONE_X + NEUTRAL_ZONE_W;
 
-            // Nibble shield when touching it
+            // Nibble shield by contact — also charges the Zorlon Cannon
             if yar_x + YAR_SIZE >= SHIELD_X {
                 if shield.nibble(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0) {
                     score += 10;
+                    zorlon.charge();
                 }
             }
 
-            // Fire cannon (only from outside neutral zone)
-            if is_key_pressed(KeyCode::Space) && !in_neutral_zone {
-                cannon.fire(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0);
+            // Space: fire missile (always available)
+            if is_key_pressed(KeyCode::Space) {
+                missile.fire(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0);
             }
 
-            cannon.update(&shield);
+            // Z: fire Zorlon Cannon (only when charged, not in neutral zone)
+            if is_key_pressed(KeyCode::Z) && !in_neutral_zone {
+                zorlon.fire(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0);
+            }
 
-            // Cannon hits Qotile
-            if cannon.active && cannon.x >= QOTILE_X - 10.0 {
-                cannon.active = false;
+            // Missile destroys shield cells on hit (already handled inside update)
+            if missile.update(&mut shield) {
+                score += 10;
+                zorlon.charge();
+            }
+
+            zorlon.update();
+
+            // Zorlon Cannon hits Qotile
+            if zorlon.active && zorlon.x >= QOTILE_X - 10.0 {
+                zorlon.active = false;
                 score += 1000;
                 state = GameState::Win;
             }
@@ -273,13 +342,23 @@ async fn main() {
         draw_circle(QOTILE_X, SCREEN_H / 2.0, 14.0, PURPLE);
         draw_circle(QOTILE_X, SCREEN_H / 2.0, 8.0, WHITE);
 
-        cannon.draw();
+        missile.draw();
+        zorlon.draw();
         swirl.draw();
 
         // Yar (player)
         let in_nz = yar_x + YAR_SIZE > NEUTRAL_ZONE_X
             && yar_x < NEUTRAL_ZONE_X + NEUTRAL_ZONE_W;
-        let yar_color = if in_nz { Color::new(0.3, 1.0, 0.3, 0.5) } else { GREEN };
+        let yar_color = if in_nz {
+            Color::new(0.3, 1.0, 0.3, 0.5)
+        } else if zorlon.charged {
+            YELLOW
+        } else {
+            GREEN
+        };
+        if zorlon.charged && !in_nz {
+            draw_circle_lines(yar_x + YAR_SIZE / 2.0, yar_y + YAR_SIZE / 2.0, 14.0, 2.0, YELLOW);
+        }
         draw_rectangle(yar_x, yar_y, YAR_SIZE, YAR_SIZE, yar_color);
         draw_triangle(
             Vec2::new(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0),
@@ -291,9 +370,12 @@ async fn main() {
         // HUD
         draw_text(&format!("SCORE: {}", score), 10.0, 24.0, 24.0, WHITE);
 
-        let in_nz_text = if in_nz { "  [SAFE ZONE - can't fire]" } else { "" };
-        draw_text(&format!("ARROWS: move  SPACE: fire Zorlon Cannon{}", in_nz_text),
-            10.0, SCREEN_H - 10.0, 18.0, GRAY);
+        let status_text = if zorlon.charged {
+            "SPACE: missile  Z: fire Zorlon Cannon!"
+        } else {
+            "SPACE: missile  |  Nibble shield to charge Zorlon Cannon"
+        };
+        draw_text(status_text, 10.0, SCREEN_H - 10.0, 18.0, GRAY);
 
         match state {
             GameState::Win => {
@@ -303,7 +385,8 @@ async fn main() {
                     215.0, 310.0, 22.0, WHITE);
                 if is_key_pressed(KeyCode::R) {
                     yar_x = 60.0; yar_y = SCREEN_H / 2.0;
-                    shield = Shield::new(); cannon = Cannon::new();
+                    shield = Shield::new(); missile = Missile::new();
+                    zorlon = ZorlonCannon::new();
                     swirl = Swirl::new(); swirl_timer = 0; score = 0;
                     state = GameState::Playing;
                 }
@@ -315,7 +398,8 @@ async fn main() {
                     215.0, 310.0, 22.0, WHITE);
                 if is_key_pressed(KeyCode::R) {
                     yar_x = 60.0; yar_y = SCREEN_H / 2.0;
-                    shield = Shield::new(); cannon = Cannon::new();
+                    shield = Shield::new(); missile = Missile::new();
+                    zorlon = ZorlonCannon::new();
                     swirl = Swirl::new(); swirl_timer = 0; score = 0;
                     state = GameState::Playing;
                 }
