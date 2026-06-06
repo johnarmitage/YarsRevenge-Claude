@@ -170,7 +170,10 @@ impl ZorlonCannon {
     fn update(&mut self, shield: &mut Shield) -> bool {
         if self.firing {
             self.shot_x += CANNON_SPEED;
-            shield.nibble(self.shot_x, self.shot_y);
+            if shield.nibble(self.shot_x, self.shot_y) {
+                self.firing = false;
+                return false;
+            }
             if self.shot_x >= QOTILE_X - 10.0 {
                 self.firing = false;
                 return true;
