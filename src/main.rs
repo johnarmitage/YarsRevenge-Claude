@@ -319,9 +319,10 @@ async fn main() {
                 state = GameState::Win;
             }
 
-            // Zorlon Cannon shot destroys the Swirl
+            // Zorlon Cannon shot destroys the Swirl — both disappear
             if zorlon.hit_swirl(&swirl) {
                 swirl.active = false;
+                zorlon.firing = false;
                 score += 250;
             }
 
