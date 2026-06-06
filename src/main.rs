@@ -333,8 +333,10 @@ async fn main() {
 
             swirl.update(yar_x + YAR_SIZE / 2.0, yar_y + YAR_SIZE / 2.0);
 
-            // Swirl hits Yar
-            if swirl.active {
+            // Swirl hits Yar — neutral zone is safe
+            let in_neutral_zone = yar_x + YAR_SIZE > NEUTRAL_ZONE_X
+                && yar_x < NEUTRAL_ZONE_X + NEUTRAL_ZONE_W;
+            if swirl.active && !in_neutral_zone {
                 let dx = swirl.x - (yar_x + YAR_SIZE / 2.0);
                 let dy = swirl.y - (yar_y + YAR_SIZE / 2.0);
                 if (dx * dx + dy * dy).sqrt() < YAR_SIZE {
