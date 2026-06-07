@@ -29,52 +29,85 @@ enum GameState {
     Lose,
 }
 
+enum NibbleResult {
+    Miss,
+    Hit(f32, f32), // (dx, dy) bounce offset
+    Consumed,
+}
+
 struct Shield {
-    cells: [[bool; SHIELD_COLS]; SHIELD_ROWS],
+    cells: [[u8; SHIELD_COLS]; SHIELD_ROWS], // 0 = gone, 1 = damaged, 2 = intact
 }
 
 impl Shield {
     fn new() -> Self {
         Self {
-            cells: [[true; SHIELD_COLS]; SHIELD_ROWS],
+            cells: [[2; SHIELD_COLS]; SHIELD_ROWS],
         }
     }
 
     fn draw(&self) {
         for row in 0..SHIELD_ROWS {
             for col in 0..SHIELD_COLS {
-                if self.cells[row][col] {
+                if self.cells[row][col] > 0 {
                     let x = SHIELD_X + col as f32 * CELL_W;
                     let y = SHIELD_Y + row as f32 * CELL_H;
-                    draw_rectangle(x, y, CELL_W - 1.0, CELL_H - 1.0, YELLOW);
+                    let color = if self.cells[row][col] == 2 { YELLOW } else { ORANGE };
+                    draw_rectangle(x, y, CELL_W - 1.0, CELL_H - 1.0, color);
                 }
             }
         }
     }
 
-    fn nibble(&mut self, x: f32, y: f32) -> bool {
+    // Rectangle overlap check for Yar's body — returns bounce direction
+    fn nibble_contact(&mut self, yar_x: f32, yar_y: f32, yar_w: f32, yar_h: f32) -> NibbleResult {
         for row in 0..SHIELD_ROWS {
             for col in 0..SHIELD_COLS {
-                if self.cells[row][col] {
+                if self.cells[row][col] > 0 {
                     let cx = SHIELD_X + col as f32 * CELL_W;
                     let cy = SHIELD_Y + row as f32 * CELL_H;
-                    if x >= cx && x <= cx + CELL_W && y >= cy && y <= cy + CELL_H {
-                        self.cells[row][col] = false;
-                        return true;
+                    if yar_x < cx + CELL_W && yar_x + yar_w > cx
+                        && yar_y < cy + CELL_H && yar_y + yar_h > cy
+                    {
+                        // Find the shallowest overlap to determine which side was hit
+                        let from_left   = (yar_x + yar_w) - cx;
+                        let from_right  = (cx + CELL_W) - yar_x;
+                        let from_top    = (yar_y + yar_h) - cy;
+                        let from_bottom = (cy + CELL_H) - yar_y;
+                        let min = from_left.min(from_right).min(from_top).min(from_bottom);
+
+                        let bounce = if min == from_left {
+                            (-28.0, 0.0)
+                        } else if min == from_right {
+                            (28.0, 0.0)
+                        } else if min == from_top {
+                            (0.0, -28.0)
+                        } else {
+                            (0.0, 28.0)
+                        };
+
+                        self.cells[row][col] -= 1;
+                        if self.cells[row][col] == 0 {
+                            return NibbleResult::Consumed;
+                        } else {
+                            return NibbleResult::Hit(bounce.0, bounce.1);
+                        }
                     }
                 }
             }
         }
-        false
+        NibbleResult::Miss
     }
 
-    fn blocks(&self, x: f32, y: f32) -> bool {
+    // Point check for projectiles — one hit destroys the cell
+    fn nibble_missile(&mut self, x: f32, y: f32) -> bool {
         for row in 0..SHIELD_ROWS {
             for col in 0..SHIELD_COLS {
-                if self.cells[row][col] {
+                if self.cells[row][col] > 0 {
                     let cx = SHIELD_X + col as f32 * CELL_W;
                     let cy = SHIELD_Y + row as f32 * CELL_H;
                     if x >= cx && x <= cx + CELL_W && y >= cy && y <= cy + CELL_H {
+                        self.cells[row][col] = 0;
                         return true;
                     }
                 }
@@ -85,7 +118,7 @@ impl Shield {
 
     fn is_column_clear(&self, col: usize) -> bool {
         for row in 0..SHIELD_ROWS {
-            if self.cells[row][col] {
+            if self.cells[row][col] > 0 {
                 return false;
             }
         }
@@ -113,20 +146,17 @@ impl Missile {
         }
     }
 
-    // Returns true if it destroyed a shield cell
-    fn update(&mut self, shield: &mut Shield) -> bool {
+    fn update(&mut self, shield: &mut Shield) {
         if self.active {
             self.x += MISSILE_SPEED;
             if self.x > SCREEN_W {
                 self.active = false;
-                return false;
+                return;
             }
-            if shield.nibble(self.x, self.y) {
+            if shield.nibble_missile(self.x, self.y) {
                 self.active = false;
-                return true;
             }
         }
-        false
     }
 
     fn draw(&self) {
@@ -170,7 +200,7 @@ impl ZorlonCannon {
     fn update(&mut self, shield: &mut Shield) -> bool {
         if self.firing {
             self.shot_x += CANNON_SPEED;
-            if shield.nibble(self.shot_x, self.shot_y) {
+            if shield.nibble_missile(self.shot_x, self.shot_y) {
                 self.firing = false;
                 return false;
             }
@@ -295,12 +325,18 @@ async fn main() {
 
             let yar_center_y = yar_y + YAR_SIZE / 2.0;
 
-            // Nibble shield by contact — ONLY way to charge the Zorlon Cannon
-            if yar_x + YAR_SIZE >= SHIELD_X {
-                if shield.nibble(yar_x + YAR_SIZE, yar_center_y) {
+            // Nibble shield by contact — ONLY way to charge the Zorlon Cannon.
+            // First hit bounces Yar away; second hit consumes the block.
+            match shield.nibble_contact(yar_x, yar_y, YAR_SIZE, YAR_SIZE) {
+                NibbleResult::Hit(dx, dy) => {
+                    yar_x = (yar_x + dx).clamp(0.0, SCREEN_W - YAR_SIZE);
+                    yar_y = (yar_y + dy).clamp(0.0, SCREEN_H - YAR_SIZE);
+                }
+                NibbleResult::Consumed => {
                     score += 10;
                     zorlon.charge();
                 }
+                NibbleResult::Miss => {}
             }
 
             // Space: fire Zorlon Cannon if charged, otherwise fire missile
