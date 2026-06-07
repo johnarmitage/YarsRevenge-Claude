@@ -13,7 +13,7 @@ const CELL_W: f32 = 16.0;
 const CELL_H: f32 = (SCREEN_H - 80.0) / SHIELD_ROWS as f32;
 const SHIELD_Y: f32 = 40.0;
 
-const YAR_SIZE: f32 = 16.0;
+const YAR_SIZE: f32 = 32.0;
 const YAR_SPEED: f32 = 4.0;
 
 const QOTILE_X: f32 = SCREEN_W - 30.0;
@@ -287,6 +287,62 @@ impl Swirl {
     }
 }
 
+// Side-view fly, facing right.
+fn draw_yar(x: f32, y: f32, size: f32, color: Color) {
+    let s  = size;
+    let cy = y + s * 0.5;
+
+    // Abdomen — tapered point on the left
+    draw_triangle(
+        Vec2::new(x,           cy),
+        Vec2::new(x + s*0.30,  cy - s*0.14),
+        Vec2::new(x + s*0.30,  cy + s*0.14),
+        color,
+    );
+
+    // Thorax — main body block
+    draw_rectangle(x + s*0.28, cy - s*0.19, s*0.36, s*0.38, color);
+
+    // Head — circle on the right
+    draw_circle(x + s*0.76, cy, s*0.15, color);
+
+    // Proboscis / beak pointing right
+    draw_triangle(
+        Vec2::new(x + s*0.89, cy - s*0.04),
+        Vec2::new(x + s*0.89, cy + s*0.04),
+        Vec2::new(x + s,      cy),
+        color,
+    );
+
+    // Upper wing — triangle pointing up from thorax
+    draw_triangle(
+        Vec2::new(x + s*0.33, cy - s*0.19),
+        Vec2::new(x + s*0.60, cy - s*0.19),
+        Vec2::new(x + s*0.30, y),
+        color,
+    );
+
+    // Lower wing — triangle pointing down from thorax
+    draw_triangle(
+        Vec2::new(x + s*0.33, cy + s*0.19),
+        Vec2::new(x + s*0.60, cy + s*0.19),
+        Vec2::new(x + s*0.30, y + s),
+        color,
+    );
+
+    // Eye — dark pupil on head
+    draw_circle(x + s*0.74, cy - s*0.06, s*0.06, BLACK);
+
+    // Legs — three per side from thorax
+    let t = (s * 0.04).max(1.5);
+    draw_line(x+s*0.38, cy-s*0.19, x+s*0.22, cy-s*0.40, t, color);
+    draw_line(x+s*0.48, cy-s*0.19, x+s*0.40, cy-s*0.40, t, color);
+    draw_line(x+s*0.58, cy-s*0.19, x+s*0.56, cy-s*0.37, t, color);
+    draw_line(x+s*0.38, cy+s*0.19, x+s*0.22, cy+s*0.40, t, color);
+    draw_line(x+s*0.48, cy+s*0.19, x+s*0.40, cy+s*0.40, t, color);
+    draw_line(x+s*0.58, cy+s*0.19, x+s*0.56, cy+s*0.37, t, color);
+}
+
 fn window_conf() -> Conf {
     Conf {
         window_title: "Yars' Revenge".to_owned(),
@@ -412,17 +468,11 @@ async fn main() {
         let in_nz = yar_x + YAR_SIZE > NEUTRAL_ZONE_X
             && yar_x < NEUTRAL_ZONE_X + NEUTRAL_ZONE_W;
         let yar_color = if in_nz {
-            Color::new(0.3, 1.0, 0.3, 0.5)
+            Color::new(1.0, 1.0, 1.0, 0.4)
         } else {
-            GREEN
+            WHITE
         };
-        draw_rectangle(yar_x, yar_y, YAR_SIZE, YAR_SIZE, yar_color);
-        draw_triangle(
-            Vec2::new(yar_x + YAR_SIZE, yar_y + YAR_SIZE / 2.0),
-            Vec2::new(yar_x, yar_y),
-            Vec2::new(yar_x, yar_y + YAR_SIZE),
-            yar_color,
-        );
+        draw_yar(yar_x, yar_y, YAR_SIZE, yar_color);
 
         // HUD
         draw_text(&format!("SCORE: {}", score), 10.0, 24.0, 24.0, WHITE);
